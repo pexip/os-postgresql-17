@@ -1,8 +1,9 @@
 Source: postgresql-17
 Section: database
 Priority: optional
-Maintainer: Debian PostgreSQL Maintainers <team+postgresql@tracker.debian.org>
-Uploaders:
+Maintainer: Pexip AS <packaging@pexip.com>
+XSBC-Pexip-Original-Maintainer: Debian PostgreSQL Maintainers <team+postgresql@tracker.debian.org>
+XSBC-Pexip-Original-Uploaders:
  Martin Pitt <mpitt@debian.org>,
  Peter Eisentraut <petere@debian.org>,
  Christoph Berg <myon@debian.org>,
@@ -54,6 +55,7 @@ Build-Depends:
 Homepage: http://www.postgresql.org/
 Vcs-Browser: https://salsa.debian.org/postgresql/postgresql
 Vcs-Git: https://salsa.debian.org/postgresql/postgresql.git -b 17
+XS-Pexip-Upstream: http://deb.debian.org/debian/ trixie
 
 Package: libpq-dev
 Build-Profiles: <!pkg.postgresql.nolibpkgs>
