@@ -1,0 +1,258 @@
+Index: postgresql-17/src/backend/libpq/be-secure-openssl.c
+===================================================================
+--- postgresql-17.orig/src/backend/libpq/be-secure-openssl.c
++++ postgresql-17/src/backend/libpq/be-secure-openssl.c
+@@ -51,6 +51,17 @@
+ #endif
+ #include <openssl/x509v3.h>
+ 
++#if OPENSSL_VERSION_NUMBER < 0x30000000L
++typedef DH pg_dh;
++#define pg_dh_free DH_free
++#define pg_set_dh_key SSL_CTX_set_tmp_dh
++#else
++#include <openssl/decoder.h>
++#include <openssl/evp.h>
++typedef EVP_PKEY pg_dh;
++#define pg_dh_free EVP_PKEY_free
++#define pg_set_dh_key SSL_CTX_set0_tmp_dh_pkey
++#endif
+ 
+ /* default init hook can be overridden by a shared library */
+ static void default_openssl_tls_init(SSL_CTX *context, bool isServerStart);
+@@ -61,8 +72,8 @@ static int	my_sock_write(BIO *h, const c
+ static BIO_METHOD *my_BIO_s_socket(void);
+ static int	my_SSL_set_fd(Port *port, int fd);
+ 
+-static DH  *load_dh_file(char *filename, bool isServerStart);
+-static DH  *load_dh_buffer(const char *buffer, size_t len);
++static pg_dh  *load_dh_file(char *filename, bool isServerStart);
++static pg_dh  *load_dh_buffer(const char *buffer, size_t len);
+ static int	ssl_external_passwd_cb(char *buf, int size, int rwflag, void *userdata);
+ static int	dummy_ssl_passwd_cb(char *buf, int size, int rwflag, void *userdata);
+ static int	verify_cb(int ok, X509_STORE_CTX *ctx);
+@@ -1023,12 +1034,18 @@ err:
+  *	to verify that the DBA-generated DH parameters file contains
+  *	what we expect it to contain.
+  */
+-static DH  *
++static pg_dh  *
+ load_dh_file(char *filename, bool isServerStart)
+ {
+ 	FILE	   *fp;
+-	DH		   *dh = NULL;
++	pg_dh	   *dh = NULL;
++	int			status = 0;
++#if OPENSSL_VERSION_NUMBER < 0x30000000L
+ 	int			codes;
++#else
++	OSSL_DECODER_CTX *octx = NULL;
++	EVP_PKEY_CTX *ctx = NULL;
++#endif
+ 
+ 	/* attempt to open file.  It's not an error if it doesn't exist. */
+ 	if ((fp = AllocateFile(filename, "r")) == NULL)
+@@ -1040,10 +1057,21 @@ load_dh_file(char *filename, bool isServ
+ 		return NULL;
+ 	}
+ 
++#if OPENSSL_VERSION_NUMBER < 0x30000000L
+ 	dh = PEM_read_DHparams(fp, NULL, NULL, NULL);
++#else
++	octx = OSSL_DECODER_CTX_new_for_pkey(&dh,
++				"PEM", NULL, NULL,
++				OSSL_KEYMGMT_SELECT_ALL_PARAMETERS, NULL, NULL);
++
++	if (octx != NULL) {
++		status = OSSL_DECODER_from_fp(octx, fp);
++		OSSL_DECODER_CTX_free(octx);
++	}
++#endif
+ 	FreeFile(fp);
+ 
+-	if (dh == NULL)
++	if ((dh == NULL) || (status < 0))
+ 	{
+ 		ereport(isServerStart ? FATAL : LOG,
+ 				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+@@ -1053,13 +1081,14 @@ load_dh_file(char *filename, bool isServ
+ 	}
+ 
+ 	/* make sure the DH parameters are usable */
++#if OPENSSL_VERSION_NUMBER < 0x30000000L
+ 	if (DH_check(dh, &codes) == 0)
+ 	{
+ 		ereport(isServerStart ? FATAL : LOG,
+ 				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+ 				 errmsg("invalid DH parameters: %s",
+ 						SSLerrmessage(ERR_get_error()))));
+-		DH_free(dh);
++		pg_dh_free(dh);
+ 		return NULL;
+ 	}
+ 	if (codes & DH_CHECK_P_NOT_PRIME)
+@@ -1067,7 +1096,7 @@ load_dh_file(char *filename, bool isServ
+ 		ereport(isServerStart ? FATAL : LOG,
+ 				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+ 				 errmsg("invalid DH parameters: p is not prime")));
+-		DH_free(dh);
++		pg_dh_free(dh);
+ 		return NULL;
+ 	}
+ 	if ((codes & DH_NOT_SUITABLE_GENERATOR) &&
+@@ -1076,9 +1105,32 @@ load_dh_file(char *filename, bool isServ
+ 		ereport(isServerStart ? FATAL : LOG,
+ 				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+ 				 errmsg("invalid DH parameters: neither suitable generator or safe prime")));
+-		DH_free(dh);
++		pg_dh_free(dh);
+ 		return NULL;
+ 	}
++#else
++	/* No longer have the ability to discriminate, just a general warning */
++	ctx = EVP_PKEY_CTX_new(dh, NULL);
++
++	if (!ctx) {
++		ereport(isServerStart ? FATAL : LOG,
++				(errcode(ERRCODE_CONFIG_FILE_ERROR),
++				 errmsg("invalid DH parameters")));
++		pg_dh_free(dh);
++		return NULL;
++	}
++
++	if (EVP_PKEY_param_check(ctx)) {
++		ereport(isServerStart ? FATAL : LOG,
++				(errcode(ERRCODE_CONFIG_FILE_ERROR),
++				 errmsg("invalid DH parameters")));
++		pg_dh_free(dh);
++		return NULL;
++	}
++
++	EVP_PKEY_CTX_free(ctx);
++
++#endif
+ 
+ 	return dh;
+ }
+@@ -1090,20 +1142,46 @@ load_dh_file(char *filename, bool isServ
+  *	the hardcoded DH parameters supplied with the backend to prevent
+  *	problems.
+  */
+-static DH  *
++static pg_dh  *
+ load_dh_buffer(const char *buffer, size_t len)
+ {
+ 	BIO		   *bio;
+-	DH		   *dh = NULL;
++	pg_dh	   *dh = NULL;
++#if OPENSSL_VERSION_NUMBER >= 0x30000000L
++	int			status;
++	OSSL_DECODER_CTX *octx = NULL;
++#endif
+ 
+ 	bio = BIO_new_mem_buf(unconstify(char *, buffer), len);
+ 	if (bio == NULL)
+ 		return NULL;
++
++#if OPENSSL_VERSION_NUMBER < 0x30000000L
+ 	dh = PEM_read_bio_DHparams(bio, NULL, NULL, NULL);
+ 	if (dh == NULL)
+ 		ereport(DEBUG2,
++			(errmsg_internal("DH load buffer: %s",
++			 SSLerrmessage(ERR_get_error()))));
++#else
++	octx = OSSL_DECODER_CTX_new_for_pkey(&dh,
++				"PEM", NULL, NULL,
++				OSSL_KEYMGMT_SELECT_ALL_PARAMETERS, NULL, NULL);
++
++	if (octx == NULL) {
++		ereport(DEBUG2,
++			(errmsg_internal("DH load buffer: %s",
++			 SSLerrmessage(ERR_get_error()))));
++	} else {
++		status = OSSL_DECODER_from_bio(octx, bio);
++		OSSL_DECODER_CTX_free(octx);
++
++		if (status) {
++			ereport(DEBUG2,
+ 				(errmsg_internal("DH load buffer: %s",
+-								 SSLerrmessage(ERR_get_error()))));
++				 SSLerrmessage(ERR_get_error()))));
++		}
++	}
++#endif
+ 	BIO_free(bio);
+ 
+ 	return dh;
+@@ -1374,7 +1452,7 @@ alpn_cb(SSL *ssl,
+ static bool
+ initialize_dh(SSL_CTX *context, bool isServerStart)
+ {
+-	DH		   *dh = NULL;
++	pg_dh	   *dh = NULL;
+ 
+ 	SSL_CTX_set_options(context, SSL_OP_SINGLE_DH_USE);
+ 
+@@ -1390,17 +1468,21 @@ initialize_dh(SSL_CTX *context, bool isS
+ 		return false;
+ 	}
+ 
+-	if (SSL_CTX_set_tmp_dh(context, dh) != 1)
++	if (pg_set_dh_key(context, dh) != 1)
+ 	{
+ 		ereport(isServerStart ? FATAL : LOG,
+ 				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+ 				 errmsg("DH: could not set DH parameters: %s",
+ 						SSLerrmessage(ERR_get_error()))));
+-		DH_free(dh);
++		pg_dh_free(dh);
+ 		return false;
+ 	}
+ 
+-	DH_free(dh);
++#if OPENSSL_VERSION_NUMBER < 0x30000000L
++	/* OpenSSL 3 and greater take ownership of the EVP_PKEY via the
++	 * SSL_CTX_set0_tmp_dh_pkey function so we must not free it */
++	pg_dh_free(dh);
++#endif
+ 	return true;
+ }
+ 
+@@ -1413,7 +1495,9 @@ static bool
+ initialize_ecdh(SSL_CTX *context, bool isServerStart)
+ {
+ #ifndef OPENSSL_NO_ECDH
++#if OPENSSL_VERSION_NUMBER < 0x30000000L
+ 	EC_KEY	   *ecdh;
++#endif
+ 	int			nid;
+ 
+ 	nid = OBJ_sn2nid(SSLECDHCurve);
+@@ -1425,6 +1509,7 @@ initialize_ecdh(SSL_CTX *context, bool i
+ 		return false;
+ 	}
+ 
++#if OPENSSL_VERSION_NUMBER < 0x30000000L
+ 	ecdh = EC_KEY_new_by_curve_name(nid);
+ 	if (!ecdh)
+ 	{
+@@ -1436,9 +1521,18 @@ initialize_ecdh(SSL_CTX *context, bool i
+ 
+ 	SSL_CTX_set_options(context, SSL_OP_SINGLE_ECDH_USE);
+ 	SSL_CTX_set_tmp_ecdh(context, ecdh);
++
+ 	EC_KEY_free(ecdh);
+-#endif
++#else
++	if (SSL_CTX_set1_curves(context, &nid, 1) != 1) {
++		ereport(isServerStart ? FATAL : LOG,
++				(errcode(ERRCODE_CONFIG_FILE_ERROR),
++				 errmsg("ECDH: could not create key")));
++		return false;
++	}
++#endif                  /* OPENSSL_VERSION_NUMBER */
+ 
++#endif                  /* OPENSSL_NO_ECDH */
+ 	return true;
+ }
+ 

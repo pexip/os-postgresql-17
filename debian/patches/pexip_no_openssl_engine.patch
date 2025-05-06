@@ -1,0 +1,14 @@
+Index: os-postgresql-15/src/interfaces/libpq/libpq-int.h
+===================================================================
+--- os-postgresql-15.orig/src/interfaces/libpq/libpq-int.h
++++ os-postgresql-15/src/interfaces/libpq/libpq-int.h
+@@ -76,6 +76,9 @@ typedef struct
+ #include <openssl/ssl.h>
+ #include <openssl/err.h>
+ 
++/* Pexip: force no engine usage for openssl 3 */
++#define OPENSSL_NO_ENGINE
++
+ #ifndef OPENSSL_NO_ENGINE
+ #define USE_SSL_ENGINE
+ #endif

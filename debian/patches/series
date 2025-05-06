@@ -12,3 +12,7 @@ focal-arm64-outline-atomics
 jit-s390x
 hurd-iovec
 pgstat-report-conflicts-immediately.patch
+
+pexip_be_openssl_fix.patch
+pexip_hmac_update.patch
+pexip_no_openssl_engine.patch
