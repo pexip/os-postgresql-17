@@ -1,3 +1,29 @@
+postgresql-17 (17.7-0+deb13u1) trixie; urgency=medium
+
+  * New upstream version 17.7.
+
+    + Check for CREATE privileges on the schema in CREATE STATISTICS
+      (Jelte Fennema-Nio)
+
+      This omission allowed table owners to create statistics in any schema,
+      potentially leading to unexpected naming conflicts.
+
+      The PostgreSQL Project thanks Jelte Fennema-Nio for reporting this
+      problem. (CVE-2025-12817)
+
+    + Avoid integer overflow in allocation-size calculations within libpq
+      (Jacob Champion)
+
+      Several places in libpq were not sufficiently careful about computing
+      the required size of a memory allocation.  Sufficiently large inputs
+      could cause integer overflow, resulting in an undersized buffer, which
+      would then lead to writing past the end of the buffer.
+
+      The PostgreSQL Project thanks Aleksey Solovev of Positive Technologies
+      for reporting this problem. (CVE-2025-12818)
+
+ -- Christoph Berg <myon@debian.org>  Thu, 25 Dec 2025 19:03:31 +0100
+
 postgresql-17 (17.6-0+deb13u1+pexip25u2) pexip-trixie; urgency=medium
 
   * Trixie build for product distribution
