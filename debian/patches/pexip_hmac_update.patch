@@ -1,3 +1,7 @@
+Replace use of old APIs which are deprecated in OpenSSL 3
+
+This patch updates the HMAC code when using OpenSSL
+
 Index: postgresql-17/src/common/hmac_openssl.c
 ===================================================================
 --- postgresql-17.orig/src/common/hmac_openssl.c

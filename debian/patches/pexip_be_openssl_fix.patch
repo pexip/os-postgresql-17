@@ -1,3 +1,7 @@
+Replace use of old APIs which are deprecated in OpenSSL 3
+
+This patch updates the backend OpenSSL code.
+
 Index: postgresql-17/src/backend/libpq/be-secure-openssl.c
 ===================================================================
 --- postgresql-17.orig/src/backend/libpq/be-secure-openssl.c

@@ -1,3 +1,7 @@
+Replace use of old APIs which are deprecated in OpenSSL 3
+
+This patch ensures that no engine is used for OpenSSL 3
+
 Index: os-postgresql-15/src/interfaces/libpq/libpq-int.h
 ===================================================================
 --- os-postgresql-15.orig/src/interfaces/libpq/libpq-int.h
