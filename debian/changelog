@@ -1,3 +1,145 @@
+postgresql-17 (17.10-0+deb13u1) trixie-security; urgency=medium
+
+  * New upstream version 17.10.
+
+    + Prevent unbounded recursion while processing startup packets
+      (Michael Paquier)
+
+      A malicious client could crash the connected backend by alternating
+      rejected SSL and GSS encryption requests indefinitely.
+
+      The PostgreSQL Project thanks Calif.io (in collaboration with Claude and
+      Anthropic Research) for reporting this problem. (CVE-2026-6479)
+
+    + Fix assorted integer overflows in memory-allocation calculations
+      (Tom Lane, Nathan Bossart, Heikki Linnakangas)
+
+      Various places were incautious about the possibility of integer overflow
+      in calculations of how much memory to allocate.  Overflow would lead to
+      allocating a too-small buffer which the caller would then write past the
+      end of.  This would at least trigger server crashes, and probably could
+      be exploited for arbitrary code execution.  In many but by no means all
+      cases, the hazard exists only in 32-bit builds.
+
+      The PostgreSQL Project thanks Xint Code, Bruce Dang, Sven Klemm, and
+      Pavel Kohout for reporting these problems. (CVE-2026-6473)
+
+    + Properly quote subscription names in pg_createsubscriber
+      (Nathan Bossart)
+
+      The given subscription name was inserted into SQL commands without
+      quoting, so that SQL injection could be achieved in the (perhaps
+      unlikely) case that the subscription name comes from an untrusted
+      source.
+
+      The PostgreSQL Project thanks Yu Kunpeng for reporting this problem.
+      (CVE-2026-6476)
+
+    + Properly quote object names in logical replication origin checks
+      (Pavel Kohout)
+
+      ALTER SUBSCRIPTION ... REFRESH PUBLICATION interpolated schema and
+      relation names into SQL commands without quoting them, allowing
+      execution of arbitrary SQL on the publisher.
+
+      The PostgreSQL Project thanks Pavel Kohout for reporting this problem.
+      (CVE-2026-6638)
+
+    + Reject over-length options in ts_headline() (Michael Paquier)
+
+      The StartSel, StopSel and FragmentDelimiter strings must not exceed 32Kb
+      in length, but this was not checked for.  An over-length value would
+      typically crash the server.
+
+      The PostgreSQL Project thanks Xint Code for reporting this problem.
+      (CVE-2026-6473)
+
+    + Guard against malicious time zone names in timeofday() and pg_strftime()
+      (Tom Lane)
+
+      A crafted time zone setting could pass % sequences to snprintf(),
+      potentially causing crashes or disclosure of server memory.  Another
+      path to similar results was to overflow the limited-size output buffer
+      used by pg_strftime().
+
+      The PostgreSQL Project thanks Xint Code for reporting this problem.
+      (CVE-2026-6474)
+
+    + When creating a multirange type, ensure the user has CREATE privilege on
+      the schema specified for the multirange type (Jelte Fennema-Nio)
+
+      The multirange type can be put into a different schema than its parent
+      range type, but we neglected to apply the required privilege check when
+      doing so.
+
+      The PostgreSQL Project thanks Jelte Fennema-Nio for reporting this
+      problem. (CVE-2026-6472)
+
+    + Use timing-safe string comparisons in authentication code
+      (Michael Paquier)
+
+      Use timingsafe_bcmp() instead of memcpy() or strcmp() when checking
+      passwords, hashes, etc.  It is not known whether the data dependency of
+      those functions is usefully exploitable in any of these places, but in
+      the interests of safety, replace them.
+
+      The PostgreSQL Project thanks Joe Conway for reporting this problem.
+      (CVE-2026-6478)
+
+    + Mark PQfn() as unsafe, and avoid using it within libpq (Nathan Bossart)
+
+      For a non-integral result type, PQfn() is not passed the size of the
+      output buffer, so it cannot check that the data returned by the server
+      will fit.  A malicious server could therefore overwrite client memory.
+      This is unfixable without an API change, so mark the function as
+      deprecated.  Internally to libpq, use a variant version that can apply
+      the missing check.
+
+      The PostgreSQL Project thanks Yu Kunpeng and Martin Heistermann for
+      reporting this problem. (CVE-2026-6477)
+
+    + Prevent path traversal in pg_basebackup and pg_rewind (Michael Paquier)
+
+      These applications failed to validate output file paths read from their
+      input, so that a malicious source could overwrite any file writable by
+      these applications.  Constrain where data can be written by rejecting
+      paths that are absolute or contain parent-directory references.
+
+      The PostgreSQL Project thanks XlabAI Team of Tencent Xuanwu Lab and
+      Valery Gubanov for reporting this problem. (CVE-2026-6475)
+
+    + Guard against field overflow within contrib/intarray's query_int type
+      and contrib/ltree's ltxtquery type (Tom Lane)
+
+      Parsing of these query structures did not check for overflow of 16-bit
+      fields, so that construction of an invalid query tree was possible.
+      This can crash the server when executing the query.
+
+      The PostgreSQL Project thanks Xint Code for reporting this problem.
+      (CVE-2026-6473)
+
+    + Guard against overly long values of contrib/ltree's lquery type
+      (Michael Paquier)
+
+      Values with more than 64K items caused internal overflows, potentially
+      resulting in stack smashes or wrong answers.
+
+      The PostgreSQL Project thanks Vergissmeinnicht, A1ex, and Jihe Wang for
+      reporting this problem. (CVE-2026-6473)
+
+    + Prevent SQL injection and buffer overruns in contrib/spi
+      (Nathan Bossart)
+
+      check_foreign_key() was insufficiently careful about quoting key values,
+      and also used fixed-length buffers for constructing queries.  While this
+      module is only meant as example code, it still shouldn't contain such
+      dangerous errors.
+
+      The PostgreSQL Project thanks Nikolay Samokhvalov for reporting this
+      problem. (CVE-2026-6637)
+
+ -- Christoph Berg <myon@debian.org>  Mon, 11 May 2026 22:57:44 +0200
+
 postgresql-17 (17.9-0+deb13u1+pexip25u1) pexip-trixie; urgency=medium
 
   * New upstream releases with security fixes
