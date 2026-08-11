@@ -1,0 +1,119 @@
+From 2636c7ca9ae3b921b4078e4735597a8d053e1974 Mon Sep 17 00:00:00 2001
+From: Zsolt Parragi <zsolt.parragi@percona.com>
+Date: Tue, 11 Aug 2026 18:16:28 +0000
+Subject: [PATCH v2] psql: count every COPY FROM STDIN when scanning a query
+ string
+
+When SendQuery() is not told how many COPY FROM STDIN commands the query
+string contains (num_copy_from_stdin < 0, as for -c, \gexec and forced
+sends), it scanned the string to count them itself.  But it called
+psql_scan() only once, which stops at the first semicolon, so any COPY
+FROM STDIN past the first sub-command was not counted.  psql then treated
+the server's COPY_IN response as unexpected and closed the connection
+with "unexpected COPY_IN result, aborting connection", e.g. for
+
+    psql -c "SELECT 1; COPY tab FROM STDIN" < data
+
+which worked before the counting was added.
+
+Loop psql_scan() over the whole string so the count accumulates across
+all sub-commands.  Add a TAP test covering a lone COPY, a COPY after
+another command, and two COPYs in one string.
+
+Oversight in commit 3045a25ba81.
+---
+ src/bin/psql/common.c       | 17 ++++++++++++-
+ src/bin/psql/t/001_basic.pl | 50 +++++++++++++++++++++++++++++++++++++
+ 2 files changed, 66 insertions(+), 1 deletion(-)
+
+--- a/src/bin/psql/common.c
++++ b/src/bin/psql/common.c
+@@ -1537,13 +1537,28 @@ ExecQueryAndProcessResults(const char *q
+ 		PsqlScanState scan_state;
+ 		PQExpBuffer query_buf;
+ 		promptStatus_t prompt_tmp;
++		PsqlScanResult scan_result;
+ 
+ 		scan_state = psql_scan_create(&psqlscan_callbacks);
+ 		psql_scan_setup(scan_state, query, strlen(query),
+ 						pset.encoding, standard_strings());
+ 		query_buf = createPQExpBuffer();
+ 
+-		(void) psql_scan(scan_state, query_buf, &prompt_tmp);
++		/*
++		 * A semicolon ends only one sub-command; keep scanning so that COPY
++		 * FROM STDIN commands past the first semicolon are counted too.  The
++		 * count accumulates in scan_state across the psql_scan() calls.
++		 *
++		 * The scan stops early if it hits a backslash command, leaving the
++		 * rest of the string uncounted.  That's fine: backslash commands are
++		 * not supported in query strings sent through this path, so the
++		 * server will fail to parse such a string before any COPY data
++		 * transfer can start.
++		 */
++		do
++		{
++			scan_result = psql_scan(scan_state, query_buf, &prompt_tmp);
++		} while (scan_result == PSCAN_SEMICOLON);
+ 
+ 		num_copy_from_stdin = psql_scan_count_copy_from_stdin(scan_state);
+ 
+--- a/src/bin/psql/t/001_basic.pl
++++ b/src/bin/psql/t/001_basic.pl
+@@ -450,6 +450,56 @@ psql_fails_like(
+ 	qr/backslash commands are restricted; only \\unrestrict is allowed/,
+ 	'meta-command in restrict mode fails');
+ 
++# Test that psql counts every COPY FROM STDIN in a query string when it has
++# to scan the string itself (as for -c).  A COPY that is not the first
++# sub-command must still be recognized, otherwise psql treats the server's
++# COPY_IN response as unexpected and aborts the connection.
++$node->safe_psql('postgres', 'CREATE TABLE copy_stdin_count (a int)');
++
++my @copy_stdin_cases = (
++	{
++		name => 'single COPY FROM STDIN',
++		sql => 'COPY copy_stdin_count FROM STDIN',
++		data => "10\n20\n\\.\n",
++		rows => 2,
++	},
++	{
++		name => 'COPY FROM STDIN after another command',
++		sql => 'SELECT 1; COPY copy_stdin_count FROM STDIN',
++		data => "30\n40\n\\.\n",
++		rows => 2,
++	},
++	{
++		name => 'two COPY FROM STDIN in one string',
++		sql => 'COPY copy_stdin_count FROM STDIN; COPY copy_stdin_count FROM STDIN',
++		data => "50\n\\.\n60\n\\.\n",
++		rows => 2,
++	});
++
++foreach my $c (@copy_stdin_cases)
++{
++	$node->safe_psql('postgres', 'TRUNCATE copy_stdin_count');
++
++	my ($stdout, $stderr) = ('', '');
++	my $ret = IPC::Run::run(
++		[
++			'psql', '-X', '-v' => 'ON_ERROR_STOP=1',
++			'-d' => $node->connstr('postgres'),
++			'-c' => $c->{sql}
++		],
++		'<' => \$c->{data},
++		'>' => \$stdout,
++		'2>' => \$stderr);
++
++	ok($ret, "$c->{name}: psql exits 0");
++	unlike($stderr, qr/unexpected COPY_IN result/,
++		"$c->{name}: connection not aborted");
++
++	my $count =
++	  $node->safe_psql('postgres', 'SELECT count(*) FROM copy_stdin_count');
++	is($count, $c->{rows}, "$c->{name}: all rows loaded");
++}
++
+ psql_fails_like(
+ 	$node,
+ 	qq{\\restrict test
