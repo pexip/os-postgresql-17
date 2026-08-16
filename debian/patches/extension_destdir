@@ -1,6 +1,6 @@
 --- a/src/backend/commands/extension.c
 +++ b/src/backend/commands/extension.c
-@@ -392,6 +392,16 @@ get_extension_control_filename(const cha
+@@ -523,6 +523,16 @@ get_extension_control_filename(const cha
  
  	get_share_path(my_exec_path, sharepath);
  	result = (char *) palloc(MAXPGPATH);
@@ -17,7 +17,7 @@
  	snprintf(result, MAXPGPATH, "%s/extension/%s.control",
  			 sharepath, extname);
  
-@@ -431,6 +441,16 @@ get_extension_aux_control_filename(Exten
+@@ -562,6 +572,16 @@ get_extension_aux_control_filename(Exten
  	scriptdir = get_extension_script_directory(control);
  
  	result = (char *) palloc(MAXPGPATH);
@@ -34,7 +34,7 @@
  	snprintf(result, MAXPGPATH, "%s/%s--%s.control",
  			 scriptdir, control->name, version);
  
-@@ -449,6 +469,23 @@ get_extension_script_filename(ExtensionC
+@@ -580,6 +600,23 @@ get_extension_script_filename(ExtensionC
  	scriptdir = get_extension_script_directory(control);
  
  	result = (char *) palloc(MAXPGPATH);
@@ -58,7 +58,7 @@
  	if (from_version)
  		snprintf(result, MAXPGPATH, "%s/%s--%s--%s.sql",
  				 scriptdir, control->name, from_version, version);
-@@ -1208,6 +1245,59 @@ get_ext_ver_list(ExtensionControlFile *c
+@@ -1339,6 +1376,59 @@ get_ext_ver_list(ExtensionControlFile *c
  	DIR		   *dir;
  	struct dirent *de;
  
@@ -120,7 +120,7 @@
  	while ((de = ReadDir(dir, location)) != NULL)
 --- a/src/include/utils/guc.h
 +++ b/src/include/utils/guc.h
-@@ -277,6 +277,7 @@ extern PGDLLIMPORT char *ConfigFileName;
+@@ -278,6 +278,7 @@ extern PGDLLIMPORT char *ConfigFileName;
  extern PGDLLIMPORT char *HbaFileName;
  extern PGDLLIMPORT char *IdentFileName;
  extern PGDLLIMPORT char *external_pid_file;
@@ -189,18 +189,18 @@
  		pfree(full);
 --- a/src/backend/utils/misc/postgresql.conf.sample
 +++ b/src/backend/utils/misc/postgresql.conf.sample
-@@ -757,6 +757,8 @@
+@@ -776,6 +776,8 @@
  # - Other Defaults -
  
  #dynamic_library_path = '$libdir'
 +#extension_destdir = ''			# prepend path when loading extensions
 +					# and shared objects (added by Debian)
  #gin_fuzzy_search_limit = 0
- 
+ #output_plugin_libraries = 'pgoutput, test_decoding'  # approved plugins for logical decoding
  
 --- a/src/backend/utils/misc/guc_tables.c
 +++ b/src/backend/utils/misc/guc_tables.c
-@@ -538,6 +538,7 @@ char	   *ConfigFileName;
+@@ -551,6 +551,7 @@ char	   *ConfigFileName;
  char	   *HbaFileName;
  char	   *IdentFileName;
  char	   *external_pid_file;
@@ -208,7 +208,7 @@
  
  char	   *application_name;
  
-@@ -4415,6 +4416,17 @@ struct config_string ConfigureNamesStrin
+@@ -4504,6 +4505,17 @@ struct config_string ConfigureNamesStrin
  	},
  
  	{

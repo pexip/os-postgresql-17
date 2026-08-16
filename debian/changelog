@@ -1,3 +1,370 @@
+postgresql-17 (17.11-0+deb13u1+pexip25u1) pexip-trixie; urgency=medium
+
+  * New upstream release with security fixes
+
+ -- Steve McIntyre <steve.mcintyre@pexip.com>  Sun, 16 Aug 2026 16:28:10 +0100
+
+postgresql-17 (17.11-0+deb13u1) trixie-security; urgency=medium
+
+  * New upstream version 17.11.
+
+    + Restrict logical decoding output plugins to the set specified by
+      a new server parameter `output_plugin_libraries` (Jacob
+      Champion)
+
+      Previously, a replication user could select any loadable library
+      for logical decoding, allowing exploits of various sorts. To
+      allow locking this down without breaking setups that worked
+      before, introduce a whitelist of allowed output plugins.
+
+      By default, only the output plugins shipped as part of
+      PostgreSQL (`pgoutput` and `test_decoding`) are included in
+      `output_plugin_libraries`. Installations that rely on other
+      output plugins must add them after updating the server, for
+      example
+
+      output_plugin_libraries = 'pgoutput, test_decoding, my_trusted_decoder'
+
+      Additionally, pg_upgrade --check will fail if the
+      `output_plugin_libraries` parameter on the new cluster does not
+      permit the plugins of logical replication slots on the old
+      cluster, when migrating from versions 17 and later. Make
+      necessary additions to the new cluster's setting before
+      performing pg_upgrade.
+
+      The PostgreSQL Project thanks Vladimir Tokarev and Yu Kunpeng
+      for reporting this problem. (CVE-2026-6471)
+
+    + Fix contrib/pgcrypto's PGP encryption to detect unsupported
+      ciphers (Daniel Gustafsson)
+
+      Previously, if OpenSSL rejected the requested cipher (for
+      example, because it is running in FIPS mode, or the legacy
+      provider hasn't been loaded), pgcrypto failed to notice the
+      failure and simply XOR'd the non-encrypted block with the
+      plaintext, rendering the "encryption" trivially breakable. This
+      will typically occur with deprecated or non-FIPS cipher
+      algorithms (cipher-algo=blowfish/bf, twofish, cast5, or 3des).
+
+      By default, pgcrypto will now fail to decrypt any messages that
+      were affected in this way. To allow retrieval of such data, a
+      new option `ignore-cipher-failure` has been added to
+      pgp_pub_decrypt() and pgp_sym_decrypt(). Setting
+      `ignore-cipher-failure=1` will restore their previous behavior,
+      allowing the faulty encryption wrapper to be stripped off:
+
+      pgp_sym_decrypt(encrypted_column, any key, 'ignore-cipher-failure=1')
+
+      Once the affected messages are identified and stripped of their
+      wrappers, they can then be re-encrypted with a modern algorithm.
+      It is important however that the behavior of OpenSSL be the same
+      as it was when the faulty messages were created: if the set of
+      unsupported algorithms is not the same, this approach will not
+      work. See the documentation for `ignore-cipher-failure`.
+
+      The PostgreSQL Project thanks Shishir Sharma for reporting this
+      problem. (CVE-2026-14663)
+
+    + Fix psql to skip in-line data following a scripted COPY ... FROM
+      STDIN command, even if the COPY fails before sending
+      `PGRES_COPY_IN` (Tom Lane)
+
+      Previously, if a `COPY` command failed at startup (for instance,
+      because the target table doesn't exist) psql would not realize
+      that and would proceed to read the following in-line data as SQL
+      commands. In the best case that's wrong and in the worst case
+      it's a SQL-injection hazard. Teach psql to recognize
+      syntactically-valid COPY ... FROM STDIN commands and to skip
+      data on its own authority if the server doesn't respond with
+      `PGRES_COPY_IN`.
+
+      While this fix is unlikely to affect any production SQL scripts,
+      test scripts might intentionally exercise failing COPY ... FROM
+      STDIN commands. Those will need to gain a `\.` data terminator
+      line after each such command.
+
+      The PostgreSQL Project thanks Alexander Lakhin for reporting
+      this problem. (CVE-2026-6464)
+
+    + Cross-check the output row type of a portal running EXECUTE or
+      FETCH (Robert Haas)
+
+      EXECUTE and FETCH use two portals: an outer one for the
+      statement itself, and an inner one running the query being
+      executed on its behalf. It was previously possible to make the
+      declared row types of the two portals diverge, leading to server
+      memory disclosure and arbitrary code execution.
+
+      The PostgreSQL Project thanks Ben Morris (in collaboration with
+      Claude and Anthropic Research) and Peter Geoghegan for reporting
+      this problem. (CVE-2026-16239)
+
+    + Fix buffer overrun with long time zone abbreviation in to_char()
+      (Tom Lane)
+
+      This can easily crash the server, and exploits leading to
+      arbitrary code execution have been reported.
+
+      The PostgreSQL Project thanks Hcamael, Amjad Shahzad, Tan Zhen
+      of AntAISecurityLab, Tomer Fichman, Zheng Yu, Amy Burnett
+      (OpenAI Codex Security), Rick de Jager, Heewon Song, Sylvie
+      Mayer, Aleksander Alekseev, and Hillai Ben Sasson for reporting
+      this problem. (CVE-2026-14669)
+
+    + Fix buffer overrun in regexp match/split functions (Masahiko
+      Sawada)
+
+      If passed invalidly-encoded data, these functions could write
+      past the end of their conversion buffer.
+
+      The PostgreSQL Project thanks Francesco Verardi for reporting
+      this problem. (CVE-2026-14664)
+
+    + Harden the ascii() function against invalid input (Michael
+      Paquier)
+
+      By supplying invalidly-encoded input, this function could be
+      coaxed to read and return a few bytes of data that it shouldn't.
+      In assert-enabled builds, its assertions could be triggered too.
+
+      The PostgreSQL Project thanks Hcamael for reporting this
+      problem. (CVE-2026-18024)
+
+    + Fix multirange type handling in pg_restore_attribute_stats()
+      (OpenAI Security Research Team)
+
+      pg_restore_attribute_stats() treated multirange types just like
+      their underlying range type. This works correctly for the bounds
+      histogram, but it was wrong for all the other statistics kinds.
+
+      The PostgreSQL Project thanks Amy Burnett (OpenAI Codex
+      Security) for reporting this problem. (CVE-2026-16238)
+
+    + Make scalarineqsel() check that a constant it expects to be of
+      type tid actually is (Tom Lane)
+
+      This expectation will hold for all the built-in operators that
+      use this estimator, but a maliciously-constructed operator could
+      violate it, leading to a crash or server memory disclosure.
+
+      The PostgreSQL Project thanks Hcamael for reporting this
+      problem. (CVE-2026-14668)
+
+    + Harden tsvector and tsquery code against overly long values
+      (both individual lexemes and total vector/query length) (Tom
+      Lane)
+
+      The documented limits were not enforced in all code paths.
+
+      The PostgreSQL Project thanks Yuhang Wu, Zhenpeng Lin, Zheng Yu,
+      and Hcamael for reporting these problems. (CVE-2026-14662)
+
+    + Fix various places that mistakenly assumed they would not have
+      to deal with more than `FUNC_MAX_ARGS` function arguments (Tom
+      Lane)
+
+      Notably, the server's actual limit on the number of arguments to
+      an aggregate function is `FUNC_MAX_ARGS - 1`, but the parser
+      failed to enforce that, creating hazards downstream.
+
+      The PostgreSQL Project thanks Zheng Yu, ylwangtju, and Masahiko
+      Sawada for reporting these problems. (CVE-2026-14679)
+
+    + Reject calls from SQL to functions that take or return type
+      internal (Tom Lane)
+
+      The existing defenses against doing this have been shown to be
+      insufficient, so add more explicit checks.
+
+      The PostgreSQL Project thanks Amy Burnett (OpenAI Codex
+      Security) for reporting this problem. (CVE-2026-14680)
+
+    + Preserve the ownership of extended statistics objects when they
+      are rebuilt by ALTER TABLE (Masahiko Sawada)
+
+      Previously, the role running ALTER TABLE gained ownership of
+      such objects, but that seems inappropriate.
+
+      The PostgreSQL Project thanks Noah Misch for reporting this
+      problem. (CVE-2026-6469)
+
+    + When deparsing an EXTRACT() function call, quote the field name
+      if needed (Nathan Bossart)
+
+      The parser accepts any string literal as a field name in
+      EXTRACT(), deferring validation to execution. If the call is
+      stored and deparsed (for example during pg_dump), the string
+      body was regurgitated verbatim, allowing SQL injection.
+
+      The PostgreSQL Project thanks Ben Morris (in collaboration with
+      Claude and Anthropic Research) for reporting this problem.
+      (CVE-2026-15741)
+
+    + Check for `USAGE` privilege on data types in places that
+      formerly failed to check that (Nathan Bossart)
+
+      CREATE TYPE AS RANGE did not check, nor did ALTER TABLE OF, nor
+      did commands that create stored expressions. These omissions
+      allowed roles without `USAGE` privilege to nonetheless create
+      objects depending on the type, possibly blocking the type's
+      owner from changing the type later.
+
+      The PostgreSQL Project thanks Jingzhou Fu for reporting this
+      problem. (CVE-2026-6470)
+
+    + Invalidate role-dependent cached plans after role changes (Ilya
+      Staroverov, Shinya Kato, Nathan Bossart)
+
+      Role membership, role attribute, and database ownership changes
+      may impact the expected behavior of row-level security policies,
+      but previously we'd continue to use cached plans that were made
+      according to the old state of affairs.
+
+      The PostgreSQL Project thanks Ilya Staroverov and Shinya Kato
+      for reporting this problem. (CVE-2026-14666)
+
+    + Reject GSSEncRequest after direct SSL connection (Michael
+      Paquier)
+
+      After establishing a TLS-encrypted connection, the server would
+      still accept a request for GSSAPI encryption. If that succeeded,
+      the connection would proceed using TLS encryption, but it would
+      look like a GSS connection to the pg_hba rules. Thus, a pg_hba
+      policy intending to disallow TLS would not be enforced
+      correctly.
+
+      The PostgreSQL Project thanks p4p3r for reporting this problem.
+      (CVE-2026-14681)
+
+    + Make mock SCRAM authentication secrets more plausible (Nathan
+      Bossart)
+
+      If a SCRAM login is attempted against a role that doesn't exist
+      or doesn't have a SCRAM secret, we generate a mock secret and
+      carry out the authentication handshake anyway, to avoid
+      revealing these facts to an attacker. But the mock secret was
+      made with a fixed iteration count, which in itself can be an
+      observable response discrepancy. Use the configuration setting
+      `scram_iterations` instead, to make the mock secret look more
+      like the installation's real secrets.
+
+      The PostgreSQL Project thanks Radim Marek for reporting this
+      problem. (CVE-2026-14672)
+
+    + Fix out-of-bounds writes in ecpg applications caused by invalid
+      bytea data received from the server (Michael Paquier)
+
+      ecpg assumed without checking that any bytea value must begin
+      with `\x`. A broken or malicious server might send a string
+      shorter than 2 bytes, resulting in memory clobber in the
+      application.
+
+      The PostgreSQL Project thanks ylwangtju for reporting this
+      problem. (CVE-2026-16241)
+
+    + Do not do backquote expansion on the argument of psql's
+      \unrestrict command (Nathan Bossart)
+
+      This oversight in the fix for CVE-2025-8714 allows a malicious
+      server to inject shell commands into plain-text dump output that
+      will be run at restore time on the machine running psql, the
+      exact scenario that CVE-2025-8714 intended to prevent.
+
+      The PostgreSQL Project thanks Lucas Velgus, Filip Janus, and
+      Daniel Bakker for reporting this problem. (CVE-2026-18408)
+
+    + Remove pg_dump's assumption that pg_proc.protrftypes cannot have
+      more than `FUNC_MAX_ARGS` entries (Tom Lane)
+
+      Since there could be entries for both input and output
+      arguments, it's feasible for this array's length to exceed
+      `FUNC_MAX_ARGS` (which constrains only input arguments). Even if
+      that were not so, pg_dump cannot assume that the server was
+      built with the same value of `FUNC_MAX_ARGS` that it has. An
+      overrun would lead to a memory clobber inside pg_dump.
+
+      The PostgreSQL Project thanks Masahiko Sawada for reporting this
+      problem. (CVE-2026-19385)
+
+    + Harden PL/Perl against "tied" Perl arrays and hashes (Tom Lane)
+
+      A tied object that doesn't behave like a regular one could lead
+      to memory overwrite, or to constructing a corrupt result array
+      (which would likely cause problems later).
+
+      The PostgreSQL Project thanks Hcamael for reporting this
+      problem. (CVE-2026-14670)
+
+    + Fix integer overflows in memory-allocation calculations in
+      PL/Perl and PL/Tcl (Heikki Linnakangas)
+
+      This is the same type of problem as CVE-2026-6473, just in a
+      different part of the code, and is fixed in the same way.
+
+      The PostgreSQL Project thanks the Tulya Project (Team Dhiutsa,
+      Bitecope Technologies Private Ltd) for reporting this problem.
+      (CVE-2026-14677)
+
+    + Ensure that contrib/amcheck functions restrict `search_path`
+      before executing index expressions (Noah Misch)
+
+      Because amcheck will run such index expressions as the owner of
+      their tables, a caller could potentially hijack
+      `search_path`-dependent functions to run arbitrary code as the
+      table owner. By default this is not a vulnerability because only
+      superusers are allowed to call amcheck functions; but if that
+      privilege was granted out, it created a larger hazard than the
+      documentation suggests.
+
+      The PostgreSQL Project thanks Yuelin Wang and Jacob Brazeal for
+      reporting this problem. (CVE-2026-14673)
+
+    + Fix integer overflows in contrib/fuzzystrmatch's levenshtein()
+      and levenshtein_less_equal() functions (Nathan Bossart)
+
+      Passing large cost values to these functions could cause integer
+      overflows, thereby producing nonsensical results, and even
+      causing out-of-bounds writes in some cases.
+
+      The PostgreSQL Project thanks Ben Morris (in collaboration with
+      Claude and Anthropic Research) for reporting this problem.
+      (CVE-2026-15742)
+
+    + Fix buffer overrun in contrib/pg_stat_statements (Álvaro
+      Herrera)
+
+      Query normalization didn't accurately account for the amount of
+      space the normalized string would require.
+
+      The PostgreSQL Project thanks Sajeeb Lohani (with TrendAI Zero
+      Day Initiative) and Yuelin Wang for reporting this problem.
+      (CVE-2026-14676)
+
+    + Fix datatype error in contrib/pg_trgm's GiST picksplit function
+      (Heikki Linnakangas)
+
+      This mistake resulted in reading past the end of the buffer,
+      typically causing bad split decisions; but a crash could ensue
+      if you're very unlucky.
+
+      The PostgreSQL Project thanks Mehmet D. Ince for reporting this
+      problem. (CVE-2026-14678)
+
+    + Remove the plan cache in contrib/refint (Ayush Tiwari)
+
+      This caching behavior has several serious bugs, notably that
+      check_foreign_key() embeds the new key values in its
+      cascade-UPDATE queries, so a cached plan reuses the
+      originally-needed values rather than the key values that should
+      be used. The simplest solution is to remove it.
+
+      The PostgreSQL Project thanks Hcamael for reporting this
+      problem. (CVE-2026-14671)
+
+  * Fix psql -c 'truncate/create table; copy from stdin'.
+
+ -- Christoph Berg <myon@debian.org>  Tue, 11 Aug 2026 23:32:38 +0200
+
 postgresql-17 (17.10-0+deb13u1+pexip25u1) pexip-trixie; urgency=medium
 
   * New upstream release
