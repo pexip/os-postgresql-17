@@ -11,4 +11,3 @@ autoconf2.69
 focal-arm64-outline-atomics
 jit-s390x
 pgstat-report-conflicts-immediately.patch
-v2-0001-psql-count-every-COPY-FROM-STDIN-when-scanning-a-.patch
